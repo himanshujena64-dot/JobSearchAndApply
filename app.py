@@ -213,7 +213,7 @@ def get_client():
         return None
     return anthropic.Anthropic(api_key=key)
 
-def ai_generate_jobs(role_category, queries, num_jobs=12):
+def ai_generate_jobs(role_category, queries, num_jobs=6):
     """
     Use Claude to generate realistic job listings based on current market knowledge.
     These serve as a structured starting point — each card includes a live portal search link.
@@ -222,43 +222,23 @@ def ai_generate_jobs(role_category, queries, num_jobs=12):
     if not client:
         return []
 
-    prompt = f"""You are a senior recruiter in India specialising in manufacturing/supply chain roles.
+    prompt = f"""You are a recruiter in India. Generate exactly {num_jobs} realistic job listings as a JSON array.
 
-Generate {num_jobs} realistic job listings for this candidate:
+Candidate: 15+ yrs Production Planning/Supply Chain, SAP PP expert, HVAC/Consumer Durables, AGM level, Greater Noida.
+Role Category: {role_category}
+Keywords: {', '.join(queries)}
 
-CANDIDATE PROFILE:
-{RESUME_SUMMARY}
+Use real Indian companies: Voltas, Daikin, Godrej, Johnson Controls, Havells, Blue Star, Carrier, LG, Samsung, Whirlpool, Bosch, Siemens, Mahindra, Tata, Schneider Electric, ABB, Honeywell, Hitachi, Panasonic, Mitsubishi Electric.
 
-ROLE CATEGORY: {role_category}
-SEARCH KEYWORDS: {', '.join(queries)}
+Return ONLY a JSON array (no markdown, no text before or after):
+[{{"title":"AGM Production Planning","company":"Voltas Limited","location":"Noida, UP","experience":"12-18 years","salary":"28-35 LPA","posted":"3 days ago","description":"Lead production planning for AC division. Drive S&OP, MRP, and dispatch.","key_skills":["SAP PP","MRP","SIOP"],"score":85,"verdict":"Strong match - HVAC + SAP PP","strengths":["SAP PP expert","HVAC background"],"gaps":["Team size may differ"]}}]
 
-Generate realistic Indian companies that actually hire for these roles (Haier, Voltas, Daikin, Godrej, Johnson Controls, Honeywell, Havells, Blue Star, Schneider Electric, Carrier, LG Electronics, Samsung, Whirlpool, Bosch, ABB, Siemens, Mahindra, Tata, etc.)
-
-Return ONLY a valid JSON array, no markdown, no explanation:
-[
-  {{
-    "title": "AGM – Production Planning",
-    "company": "Voltas Limited",
-    "location": "Greater Noida, UP",
-    "experience": "12–18 years",
-    "salary": "₹28–35 LPA",
-    "source": "Naukri",
-    "posted": "2 days ago",
-    "description": "2–3 sentence description of the role responsibilities",
-    "key_skills": ["SAP PP", "MRP", "SIOP", "Capacity Planning"],
-    "score": 85,
-    "verdict": "Excellent match – SAP PP + HVAC experience directly relevant",
-    "strengths": ["SAP PP expertise aligns perfectly", "HVAC industry background at Blue Star", "OTIF improvement track record"],
-    "gaps": ["Large team leadership experience may need emphasis"]
-  }}
-]
-
-Make salaries, locations, and requirements realistic for India 2025. Vary companies, locations (Delhi NCR, Pune, Mumbai, Bangalore, Chennai), and seniority levels."""
+Generate {num_jobs} entries total. Keep description under 15 words. Keep strengths/gaps arrays to 2 items max."""
 
     try:
         msg = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=3000,
+            max_tokens=4096,
             messages=[{"role": "user", "content": prompt}]
         )
         text = msg.content[0].text.strip()
@@ -490,7 +470,7 @@ elif page == "🔍 Find Jobs":
     with col1:
         role_filter = st.selectbox("Job Role Category", list(SEARCH_QUERIES.keys()))
     with col2:
-        num_jobs = st.selectbox("Jobs to generate", [8, 12, 16, 20], index=1)
+        num_jobs = st.selectbox("Jobs to generate", [4, 6, 8, 10], index=1)
     with col3:
         custom_query = st.text_input("Custom focus (optional)", placeholder="e.g. VP Operations")
 
