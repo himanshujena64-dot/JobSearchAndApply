@@ -1,8 +1,4 @@
 import streamlit as st
-
-
-import streamlit as st
-
 # ── PASSWORD PROTECTION ───────────────────────────────────────────────────────
 def check_password():
     if "authenticated" not in st.session_state:
