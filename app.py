@@ -1,4 +1,25 @@
 import streamlit as st
+
+
+import streamlit as st
+
+# ── PASSWORD PROTECTION ───────────────────────────────────────────────────────
+def check_password():
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+    if not st.session_state.authenticated:
+        st.title("🔒 JobPilot — Login")
+        pwd = st.text_input("Enter password", type="password")
+        if st.button("Login"):
+            if pwd == st.secrets.get("APP_PASSWORD", "himanshu2040"):
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("Wrong password")
+        st.stop()
+
+check_password()
+# ── rest of your app continues below ─────────────────────────────────────────
 import anthropic
 import pandas as pd
 import plotly.express as px
