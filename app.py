@@ -1,864 +1,579 @@
 import streamlit as st
-# ── PASSWORD PROTECTION ───────────────────────────────────────────────────────
-def check_password():
-    if "authenticated" not in st.session_state:
-        st.session_state.authenticated = False
-    if not st.session_state.authenticated:
-        st.title("🔒 JobPilot — Login")
-        pwd = st.text_input("Enter password", type="password")
-        if st.button("Login"):
-            if pwd == st.secrets.get("APP_PASSWORD", "himanshu2040"):
-                st.session_state.authenticated = True
-                st.rerun()
-            else:
-                st.error("Wrong password")
-        st.stop()
-
-check_password()
-# ── rest of your app continues below ─────────────────────────────────────────
 import anthropic
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-import json
-import time
-import re
+import json, time, re
 from datetime import datetime, date
-import urllib.parse
 
-# ── PAGE CONFIG ───────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="JobPilot – Himanshu's Job Tracker",
-    page_icon="🎯",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+st.set_page_config(page_title="JobPilot – Himanshu Jena", page_icon="🎯", layout="wide")
 
-# ── CUSTOM CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    .main-header {
-        background: linear-gradient(135deg, #0D2137 0%, #1A5276 100%);
-        padding: 1.5rem 2rem;
-        border-radius: 12px;
-        margin-bottom: 1.5rem;
-        color: white;
-    }
-    .main-header h1 { color: white; margin: 0; font-size: 2rem; }
-    .main-header p  { color: #AED6F1; margin: 0.3rem 0 0; font-size: 1rem; }
-
-    .metric-card {
-        background: white;
-        border: 1px solid #e0e0e0;
-        border-radius: 10px;
-        padding: 1rem 1.2rem;
-        text-align: center;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.06);
-    }
-    .metric-card .value { font-size: 2rem; font-weight: 700; color: #1A5276; }
-    .metric-card .label { font-size: 0.8rem; color: #888; margin-top: 0.2rem; }
-
-    .job-card {
-        background: white;
-        border: 1px solid #e8f4fd;
-        border-left: 4px solid #2E75B6;
-        border-radius: 8px;
-        padding: 1rem 1.2rem;
-        margin-bottom: 0.8rem;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-    }
-    .job-card:hover { border-left-color: #F0B429; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-    .job-card h4 { margin: 0 0 0.2rem; color: #0D2137; font-size: 1rem; }
-    .job-card .company { color: #1A5276; font-weight: 600; font-size: 0.9rem; }
-    .job-card .meta { color: #888; font-size: 0.8rem; margin-top: 0.3rem; }
-
-    .match-badge {
-        display: inline-block;
-        padding: 0.2rem 0.6rem;
-        border-radius: 20px;
-        font-size: 0.75rem;
-        font-weight: 700;
-    }
-    .match-high   { background: #d4edda; color: #155724; }
-    .match-medium { background: #fff3cd; color: #856404; }
-    .match-low    { background: #f8d7da; color: #721c24; }
-
-    .status-badge {
-        display: inline-block;
-        padding: 0.15rem 0.5rem;
-        border-radius: 12px;
-        font-size: 0.72rem;
-        font-weight: 600;
-    }
-    .status-applied    { background: #cce5ff; color: #004085; }
-    .status-interview  { background: #d4edda; color: #155724; }
-    .status-rejected   { background: #f8d7da; color: #721c24; }
-    .status-saved      { background: #e2e3e5; color: #383d41; }
-    .status-offer      { background: #d1ecf1; color: #0c5460; }
-
-    .cover-letter-box {
-        background: #f8f9fa;
-        border: 1px solid #dee2e6;
-        border-radius: 8px;
-        padding: 1.2rem;
-        font-size: 0.88rem;
-        line-height: 1.7;
-        white-space: pre-wrap;
-        max-height: 400px;
-        overflow-y: auto;
-    }
-    .section-title {
-        font-size: 1.1rem;
-        font-weight: 700;
-        color: #0D2137;
-        border-bottom: 2px solid #2E75B6;
-        padding-bottom: 0.4rem;
-        margin-bottom: 1rem;
-    }
-    .portal-link-box {
-        background: #f0f7ff;
-        border: 1px solid #b8d9f5;
-        border-radius: 8px;
-        padding: 0.8rem 1rem;
-        margin-bottom: 0.5rem;
-    }
-    .ai-job-notice {
-        background: #fff8e1;
-        border: 1px solid #ffe082;
-        border-radius: 8px;
-        padding: 0.7rem 1rem;
-        font-size: 0.85rem;
-        color: #5d4037;
-        margin-bottom: 1rem;
-    }
-    div[data-testid="stSidebar"] { background: #0D2137; }
-    div[data-testid="stSidebar"] * { color: white !important; }
-    div[data-testid="stSidebar"] .stSelectbox label,
-    div[data-testid="stSidebar"] .stTextInput label { color: #AED6F1 !important; }
+.main-header {
+    background: linear-gradient(135deg, #0D2137 0%, #1A5276 100%);
+    padding: 1.5rem 2rem; border-radius: 12px; margin-bottom: 1.5rem;
+}
+.main-header h1 { color: white; margin: 0; font-size: 1.8rem; }
+.main-header p  { color: #AED6F1; margin: 0.3rem 0 0; }
+.metric-card {
+    background: white; border: 1px solid #e0e0e0; border-radius: 10px;
+    padding: 1rem; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+}
+.metric-card .value { font-size: 2rem; font-weight: 700; color: #1A5276; }
+.metric-card .label { font-size: 0.8rem; color: #888; }
+.job-card {
+    background: white; border: 1px solid #e8f4fd;
+    border-left: 4px solid #2E75B6; border-radius: 8px;
+    padding: 1rem 1.2rem; margin-bottom: 0.8rem;
+}
+.section-title {
+    font-size: 1.1rem; font-weight: 700; color: #0D2137;
+    border-bottom: 2px solid #2E75B6; padding-bottom: 0.4rem; margin-bottom: 1rem;
+}
+.match-high   { background:#d4edda; color:#155724; padding:2px 8px; border-radius:12px; font-size:0.75rem; font-weight:700; }
+.match-medium { background:#fff3cd; color:#856404; padding:2px 8px; border-radius:12px; font-size:0.75rem; font-weight:700; }
+.match-low    { background:#f8d7da; color:#721c24; padding:2px 8px; border-radius:12px; font-size:0.75rem; font-weight:700; }
+div[data-testid="stSidebar"] { background: #0D2137; }
+div[data-testid="stSidebar"] * { color: white !important; }
 </style>
 """, unsafe_allow_html=True)
 
 # ── SESSION STATE ─────────────────────────────────────────────────────────────
-if "jobs"         not in st.session_state: st.session_state.jobs = []
-if "applications" not in st.session_state: st.session_state.applications = []
-if "api_key"      not in st.session_state: st.session_state.api_key = ""
-if "cover_letter" not in st.session_state: st.session_state.cover_letter = ""
-if "match_result" not in st.session_state: st.session_state.match_result = {}
+for k, v in [("jobs", []), ("applications", []), ("api_key", ""), ("cover_letter", "")]:
+    if k not in st.session_state:
+        st.session_state[k] = v
 
-# ── RESUME SUMMARY (used for AI matching) ─────────────────────────────────────
 RESUME_SUMMARY = """
 Name: Himanshu Jena
-Current Role: Assistant General Manager – Production Planning & Dispatch, Haier Appliances India
-Experience: 15+ years in Production Planning, Supply Chain, Dispatch Management
-Industries: HVAC (Air Conditioners), Automotive, Consumer Durables
-
-Key Skills:
-- SAP PP, SAP MM, SAP SD, SAP FICO
-- MRP Execution, Capacity Planning, S&OP, SIOP, MPS
-- BOM, Routing, Material Master, Engineering Change Management
-- Inventory Optimisation (RM/WIP/FG), Dispatch Management
-- Power BI Dashboards, Advanced Excel, VBS Scripting, Python, Streamlit
-- ORTEMS, Plan Visage APS, ERP Oracle
-- Six Sigma Yellow Belt, Lean, KANBAN, FIFO
-
-Key Achievements:
-- Improved OTIF from 97.9% to 99.9% at Blue Star
-- Automated reporting saving ~40% effort via VBS scripting
+Role: AGM – Production Planning & Dispatch, Haier Appliances India
+Experience: 15+ years | Industries: HVAC, Automotive, Consumer Durables
+Skills: SAP PP/MM/SD/FICO, MRP, Capacity Planning, S&OP, SIOP, BOM/Routing,
+        Inventory Optimisation, Dispatch Management, Power BI, Advanced Excel,
+        VBS Scripting, Python, Streamlit, ORTEMS, Plan Visage, ERP Oracle
+Achievements:
+- OTIF improved 97.9% to 99.9% at Blue Star
+- Automated reporting saving ~40% effort via VBS
 - Built live Streamlit web app for production intelligence
 - Led SAP PP go-live at Havells (master data + UAT)
-- Completed 2 Six Sigma projects
-
-Career Progression:
-- Haier Appliances: AGM Production Planning & Dispatch (Sep 2025–Present)
-- Havells India: Manager PPC (Oct 2022–Sep 2025)
-- Blue Star: Asst Manager PPC (Sep 2016–Sep 2022)
-- Yazaki India: Engineer PPC (Dec 2014–Sep 2016)
-- Sona Koyo: Junior Engineer PPC (Aug 2011–Nov 2014)
-
-Location: Greater Noida, India
-Target Roles: AGM/DGM/GM Production Planning, Supply Chain Manager, SAP PP Consultant
-Target Salary: Senior/AGM level (₹25–40 LPA range)
+- Six Sigma Yellow Belt – 2 projects completed
+Career: Haier(AGM,2025-now) → Havells(Mgr,2022-25) → Blue Star(AM,2016-22)
+        → Yazaki(Engr,2014-16) → Sona Koyo(Jr Engr,2011-14)
+Location: Greater Noida | Target: AGM/DGM Production Planning, SCM Head, SAP PP Lead
 """
 
-# ── SEARCH QUERIES ─────────────────────────────────────────────────────────────
-SEARCH_QUERIES = {
-    "Production Planning / PPC":  ["AGM production planning", "DGM production planning HVAC", "Manager PPC supply chain"],
-    "Supply Chain Manager":        ["Supply chain manager Greater Noida", "SCM AGM India", "head supply chain HVAC"],
-    "SAP PP Consultant":           ["SAP PP consultant India", "SAP PP functional lead", "SAP production planning"],
-    "All of the above":            ["AGM production planning", "supply chain manager HVAC", "SAP PP lead India", "DGM PPC"],
-}
-
-# ── PORTAL SEARCH URL BUILDERS ────────────────────────────────────────────────
-def get_naukri_url(query):
-    slug = query.lower().strip().replace(" ", "-")
-    slug = re.sub(r"[^a-z0-9\-]", "", slug)
-    return f"https://www.naukri.com/{slug}-jobs?k={urllib.parse.quote(query)}&l=Delhi%2FNCR%2C+Greater+Noida"
-
-def get_indeed_url(query):
-    return f"https://in.indeed.com/jobs?q={urllib.parse.quote(query)}&l=Greater+Noida%2C+Uttar+Pradesh&sort=date"
-
-def get_linkedin_url(query):
-    return f"https://www.linkedin.com/jobs/search/?keywords={urllib.parse.quote(query)}&location=India&f_TPR=r86400&sortBy=DD"
-
-def get_shine_url(query):
-    return f"https://www.shine.com/job-search/{urllib.parse.quote(query.replace(' ','-'))}-jobs"
-
-def get_foundit_url(query):
-    return f"https://www.foundit.in/srp/results?query={urllib.parse.quote(query)}&location=Delhi+NCR"
-
-# ── AI FUNCTIONS ───────────────────────────────────────────────────────────────
 def get_client():
     key = st.session_state.api_key or st.secrets.get("ANTHROPIC_API_KEY", "")
-    if not key:
-        return None
-    return anthropic.Anthropic(api_key=key)
+    return anthropic.Anthropic(api_key=key) if key else None
 
-def ai_generate_jobs(role_category, queries, num_jobs=6):
-    """
-    Use Claude to generate realistic job listings based on current market knowledge.
-    These serve as a structured starting point — each card includes a live portal search link.
-    """
+# ── CORE: SEARCH JOBS USING CLAUDE WEB SEARCH ─────────────────────────────────
+def search_jobs_with_claude(query, location="India", num_jobs=10):
+    """Use Claude's web_search tool to find real jobs from Naukri/LinkedIn/Indeed."""
     client = get_client()
     if not client:
-        return []
+        return [], "No API key"
 
-    prompt = f"""You are a recruiter in India. Generate exactly {num_jobs} realistic job listings as a JSON array.
+    prompt = f"""Search for current job openings matching: "{query}" in {location}.
 
-Candidate: 15+ yrs Production Planning/Supply Chain, SAP PP expert, HVAC/Consumer Durables, AGM level, Greater Noida.
-Role Category: {role_category}
-Keywords: {', '.join(queries)}
+Search across Naukri.com, LinkedIn Jobs, and Indeed India.
 
-Use real Indian companies: Voltas, Daikin, Godrej, Johnson Controls, Havells, Blue Star, Carrier, LG, Samsung, Whirlpool, Bosch, Siemens, Mahindra, Tata, Schneider Electric, ABB, Honeywell, Hitachi, Panasonic, Mitsubishi Electric.
+Find {num_jobs} real, currently open job postings. For each job return:
+- Job title
+- Company name  
+- Location
+- Experience required
+- Source portal (Naukri/LinkedIn/Indeed)
+- Direct job URL (the actual link to apply)
+- Brief job description (2-3 lines)
 
-Return ONLY a JSON array (no markdown, no text before or after):
-[{{"title":"AGM Production Planning","company":"Voltas Limited","location":"Noida, UP","experience":"12-18 years","salary":"28-35 LPA","posted":"3 days ago","description":"Lead production planning for AC division. Drive S&OP, MRP, and dispatch.","key_skills":["SAP PP","MRP","SIOP"],"score":85,"verdict":"Strong match - HVAC + SAP PP","strengths":["SAP PP expert","HVAC background"],"gaps":["Team size may differ"]}}]
-
-Generate {num_jobs} entries total. Keep description under 15 words. Keep strengths/gaps arrays to 2 items max."""
+Return ONLY a JSON array, no markdown, no explanation:
+[
+  {{
+    "title": "...",
+    "company": "...",
+    "location": "...",
+    "experience": "...",
+    "source": "Naukri/LinkedIn/Indeed",
+    "url": "https://...",
+    "description": "..."
+  }}
+]"""
 
     try:
-        msg = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=4096,
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=3000,
+            tools=[{"type": "web_search_20250305", "name": "web_search"}],
             messages=[{"role": "user", "content": prompt}]
         )
-        text = msg.content[0].text.strip()
-        text = re.sub(r"```json|```", "", text).strip()
-        jobs_raw = json.loads(text)
+        # Extract text from all content blocks
+        full_text = ""
+        for block in response.content:
+            if hasattr(block, "text"):
+                full_text += block.text
 
-        # Enrich with portal search links and IDs
-        enriched = []
-        for i, j in enumerate(jobs_raw):
-            search_q = f"{j.get('title','')} {j.get('company','')}"
-            j["url_naukri"]  = get_naukri_url(j.get("title",""))
-            j["url_indeed"]  = get_indeed_url(search_q)
-            j["url_linkedin"]= get_linkedin_url(search_q)
-            j["url_foundit"] = get_foundit_url(j.get("title",""))
-            j["match_score"] = j.pop("score", 70)
-            j["match_reason"]= j.pop("verdict", "")
-            j["status"]      = "Saved"
-            j["applied_date"]= None
-            j["cover_letter"]= ""
-            j["id"]          = f"AI-{i}-{hash(j['title']+j['company'])}"
-            j["ai_generated"] = True
-            enriched.append(j)
-        return enriched
+        # Parse JSON
+        clean = re.sub(r"```json|```", "", full_text).strip()
+        # Find JSON array in response
+        match = re.search(r'\[.*\]', clean, re.DOTALL)
+        if match:
+            jobs_raw = json.loads(match.group())
+            jobs = []
+            for j in jobs_raw:
+                jobs.append({
+                    "title":       j.get("title", ""),
+                    "company":     j.get("company", ""),
+                    "location":    j.get("location", location),
+                    "experience":  j.get("experience", ""),
+                    "source":      j.get("source", "Web"),
+                    "url":         j.get("url", "#"),
+                    "description": j.get("description", ""),
+                    "match_score": None,
+                    "match_reason": "",
+                    "status":      "Saved",
+                    "applied_date": None,
+                    "id": f"JOB-{abs(hash(j.get('title','') + j.get('company','')))}"
+                })
+            return jobs, None
+        return [], "Could not parse job results"
     except Exception as e:
-        st.error(f"AI job generation error: {e}")
-        return []
+        return [], str(e)
 
-def ai_match_job(job_title, job_company, job_description=""):
-    """Score how well Himanshu matches this job using Claude."""
+# ── AI MATCH SCORE ─────────────────────────────────────────────────────────────
+def ai_match_job(title, company, description=""):
     client = get_client()
     if not client:
-        return {"score": 0, "verdict": "⚠️ Add API key", "strengths": [], "gaps": []}
-    prompt = f"""You are an expert recruiter. Score how well this candidate matches the job.
-
-CANDIDATE RESUME:
-{RESUME_SUMMARY}
-
-JOB:
-Title: {job_title}
-Company: {job_company}
-Description: {job_description or "Not provided — judge by title only"}
-
-Return ONLY valid JSON (no markdown, no explanation):
-{{
-  "score": <integer 0-100>,
-  "verdict": "<one line summary>",
-  "strengths": ["<strength 1>", "<strength 2>", "<strength 3>"],
-  "gaps": ["<gap 1>", "<gap 2>"]
-}}"""
+        return {"score": 0, "verdict": "Add API key", "strengths": [], "gaps": []}
     try:
         msg = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=400,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        text = msg.content[0].text.strip()
-        text = re.sub(r"```json|```", "", text).strip()
-        return json.loads(text)
-    except Exception as e:
-        return {"score": 50, "verdict": f"Could not parse: {e}", "strengths": [], "gaps": []}
+            messages=[{"role": "user", "content": f"""Score how well this candidate matches the job. Return ONLY valid JSON.
 
-def ai_cover_letter(job_title, job_company, job_description=""):
-    """Generate a tailored cover letter using Claude."""
+CANDIDATE: {RESUME_SUMMARY}
+
+JOB: {title} at {company}
+{description}
+
+Return JSON only:
+{{"score": <0-100>, "verdict": "<one line>", "strengths": ["...", "..."], "gaps": ["..."]}}"""}]
+        )
+        text = re.sub(r"```json|```", "", msg.content[0].text).strip()
+        return json.loads(text)
+    except:
+        return {"score": 55, "verdict": "Match estimated", "strengths": [], "gaps": []}
+
+# ── COVER LETTER ───────────────────────────────────────────────────────────────
+def ai_cover_letter(title, company, description=""):
     client = get_client()
     if not client:
-        return "⚠️ Please add your Anthropic API key in the sidebar."
-    prompt = f"""Write a professional, concise cover letter for this job application.
-
-CANDIDATE:
-{RESUME_SUMMARY}
-
-JOB:
-Title: {job_title}
-Company: {job_company}
-Description: {job_description or "Focus on the role title"}
-
-Guidelines:
-- 3 short paragraphs, no longer than 250 words total
-- Paragraph 1: Why this role and company specifically
-- Paragraph 2: 2-3 specific achievements from resume that match the role
-- Paragraph 3: Call to action
-- Professional but warm tone
-- Do NOT use generic phrases like "I am writing to apply..."
-- Start with something specific about the role or company
-- End with: "Warm regards,\\nHimanshu Jena\\n+91-7018083915 | himanshujena64@gmail.com"
-
-Write the cover letter only, no commentary."""
+        return "Please add your Anthropic API key in the sidebar."
     try:
         msg = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=600,
-            messages=[{"role": "user", "content": prompt}]
+            max_tokens=700,
+            messages=[{"role": "user", "content": f"""Write a concise professional cover letter.
+
+CANDIDATE: {RESUME_SUMMARY}
+JOB: {title} at {company}
+DESCRIPTION: {description or 'Not provided'}
+
+Rules:
+- 3 short paragraphs, max 220 words
+- Para 1: Why this specific role/company
+- Para 2: 2 specific achievements from resume matching this role
+- Para 3: Call to action
+- Do NOT start with "I am writing to apply"
+- End with: Warm regards,\\nHimanshu Jena\\n+91-7018083915 | himanshujena64@gmail.com
+
+Write only the letter:"""}]
         )
         return msg.content[0].text.strip()
     except Exception as e:
-        return f"Error generating cover letter: {e}"
+        return f"Error: {e}"
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### 🎯 JobPilot")
-    st.markdown("*Your AI-powered job hunt*")
+    st.markdown("*AI-powered job hunt*")
     st.divider()
-
-    page = st.radio("Navigate", [
-        "🏠 Dashboard",
-        "🔍 Find Jobs",
-        "🤖 AI Match & Apply",
-        "📋 Applications Tracker",
-        "⚙️ Settings",
-    ], label_visibility="collapsed")
-
+    page = st.radio("Navigate", ["🏠 Dashboard", "🔍 Find Jobs", "🤖 AI Match & Apply", "📋 Tracker", "⚙️ Settings"], label_visibility="collapsed")
     st.divider()
-    st.markdown("**API Key**")
-    api_input = st.text_input("Anthropic API Key", type="password",
-                               value=st.session_state.api_key,
-                               placeholder="sk-ant-...",
-                               help="Get free key at console.anthropic.com")
+    api_input = st.text_input("Anthropic API Key", type="password", value=st.session_state.api_key, placeholder="sk-ant-...")
     if api_input:
         st.session_state.api_key = api_input
         st.success("✓ Key saved")
-
     st.divider()
-    st.markdown(f"**Total jobs found:** {len(st.session_state.jobs)}")
+    st.markdown(f"**Jobs found:** {len(st.session_state.jobs)}")
     apps = st.session_state.applications
-    st.markdown(f"**Applications sent:** {len([a for a in apps if a['status'] != 'Saved'])}")
-    st.markdown(f"**Interviews:** {len([a for a in apps if a['status'] == 'Interview'])}")
+    st.markdown(f"**Applied:** {len([a for a in apps if a.get('status') not in ('Saved',)])}")
+    st.markdown(f"**Interviews:** {len([a for a in apps if a.get('status') == 'Interview'])}")
 
 # ── HEADER ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="main-header">
   <h1>🎯 JobPilot — Himanshu Jena</h1>
-  <p>AGM Production Planning & Dispatch · 15+ Years · Greater Noida</p>
-</div>
-""", unsafe_allow_html=True)
+  <p>AGM Production Planning & Dispatch · 15+ Years · Greater Noida · Powered by Claude AI</p>
+</div>""", unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE: DASHBOARD
-# ══════════════════════════════════════════════════════════════════════════════
+# ══ DASHBOARD ════════════════════════════════════════════════════════════════
 if page == "🏠 Dashboard":
     apps = st.session_state.applications
-
     c1, c2, c3, c4, c5 = st.columns(5)
-    with c1:
-        st.markdown(f'<div class="metric-card"><div class="value">{len(st.session_state.jobs)}</div><div class="label">Jobs Found</div></div>', unsafe_allow_html=True)
-    with c2:
-        applied = len([a for a in apps if a["status"] not in ("Saved",)])
-        st.markdown(f'<div class="metric-card"><div class="value">{applied}</div><div class="label">Applied</div></div>', unsafe_allow_html=True)
-    with c3:
-        interviews = len([a for a in apps if a["status"] == "Interview"])
-        st.markdown(f'<div class="metric-card"><div class="value">{interviews}</div><div class="label">Interviews</div></div>', unsafe_allow_html=True)
-    with c4:
-        high_match = len([j for j in st.session_state.jobs if (j.get("match_score") or 0) >= 70])
-        st.markdown(f'<div class="metric-card"><div class="value">{high_match}</div><div class="label">Strong Matches</div></div>', unsafe_allow_html=True)
-    with c5:
-        offers = len([a for a in apps if a["status"] == "Offer"])
-        st.markdown(f'<div class="metric-card"><div class="value">{offers}</div><div class="label">Offers</div></div>', unsafe_allow_html=True)
+    metrics = [
+        (len(st.session_state.jobs), "Jobs Found"),
+        (len([a for a in apps if a.get("status") != "Saved"]), "Applied"),
+        (len([a for a in apps if a.get("status") == "Interview"]), "Interviews"),
+        (len([j for j in st.session_state.jobs if (j.get("match_score") or 0) >= 70]), "Strong Matches"),
+        (len([a for a in apps if a.get("status") == "Offer"]), "Offers"),
+    ]
+    for col, (val, label) in zip([c1,c2,c3,c4,c5], metrics):
+        with col:
+            st.markdown(f'<div class="metric-card"><div class="value">{val}</div><div class="label">{label}</div></div>', unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
-    col_l, col_r = st.columns([3, 2])
+    left, right = st.columns([3, 2])
 
-    with col_l:
+    with left:
         st.markdown('<div class="section-title">📊 Application Pipeline</div>', unsafe_allow_html=True)
         if apps:
-            status_counts = pd.Series([a["status"] for a in apps]).value_counts().reset_index()
-            status_counts.columns = ["Status", "Count"]
-            colors_map = {"Saved":"#6c757d","Applied":"#2E75B6","Interview":"#28a745","Rejected":"#dc3545","Offer":"#17a2b8"}
-            fig = px.bar(status_counts, x="Status", y="Count",
-                         color="Status", color_discrete_map=colors_map,
-                         text="Count", height=280)
-            fig.update_layout(showlegend=False, plot_bgcolor="white",
-                              margin=dict(t=20,b=20,l=20,r=20))
-            fig.update_traces(textposition="outside")
+            df = pd.Series([a["status"] for a in apps]).value_counts().reset_index()
+            df.columns = ["Status", "Count"]
+            fig = px.bar(df, x="Status", y="Count", color="Status", text="Count", height=260,
+                         color_discrete_map={"Saved":"#6c757d","Applied":"#2E75B6","Interview":"#28a745","Rejected":"#dc3545","Offer":"#17a2b8"})
+            fig.update_layout(showlegend=False, plot_bgcolor="white", margin=dict(t=10,b=10,l=10,r=10))
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("📭 No applications yet. Go to **Find Jobs** to get started!")
+            st.info("No applications yet. Go to **Find Jobs** to start!")
 
-    with col_r:
+    with right:
         st.markdown('<div class="section-title">🔥 Top Matches</div>', unsafe_allow_html=True)
-        scored = [j for j in st.session_state.jobs if j.get("match_score") is not None]
-        top    = sorted(scored, key=lambda x: x["match_score"], reverse=True)[:5]
+        top = sorted([j for j in st.session_state.jobs if j.get("match_score")], key=lambda x: x["match_score"], reverse=True)[:5]
         if top:
             for j in top:
-                score = j["match_score"]
-                badge = "match-high" if score >= 70 else ("match-medium" if score >= 50 else "match-low")
-                st.markdown(f"""
-                <div class="job-card">
-                  <h4>{j['title'][:45]}{'…' if len(j['title'])>45 else ''}</h4>
-                  <span class="company">{j['company']}</span>
-                  <span class="match-badge {badge}" style="float:right">{score}% match</span>
-                  <div class="meta">📍 {j['location']} &nbsp;|&nbsp; {j.get('source','AI')}</div>
+                sc = j["match_score"]
+                cls = "match-high" if sc>=70 else ("match-medium" if sc>=50 else "match-low")
+                st.markdown(f"""<div class="job-card">
+                  <b>{j['title'][:40]}</b> <span class="{cls}" style="float:right">{sc}%</span><br>
+                  <span style="color:#1A5276">{j['company']}</span>
+                  <span style="color:#888;font-size:0.8rem"> · {j['source']}</span>
                 </div>""", unsafe_allow_html=True)
         else:
-            st.info("Search for jobs in **Find Jobs** to see top matches here.")
+            st.info("Search and score jobs to see top matches.")
 
     # Follow-up reminders
     st.markdown('<div class="section-title">⏰ Follow-up Reminders</div>', unsafe_allow_html=True)
     today = date.today()
-    reminders = []
+    due = []
     for a in apps:
-        if a.get("applied_date") and a["status"] == "Applied":
+        if a.get("applied_date") and a.get("status") == "Applied":
             try:
-                ap_date = datetime.strptime(a["applied_date"], "%Y-%m-%d").date()
-                days_since = (today - ap_date).days
-                if days_since >= 7:
-                    reminders.append({**a, "days_since": days_since})
+                days = (today - datetime.strptime(a["applied_date"], "%Y-%m-%d").date()).days
+                if days >= 7:
+                    due.append((a, days))
             except: pass
-    if reminders:
-        for r in reminders[:5]:
-            st.warning(f"📬 **{r['title']}** at {r['company']} — applied {r['days_since']} days ago. Time to follow up!")
+    if due:
+        for a, d in due[:5]:
+            st.warning(f"📬 **{a['title']}** at {a['company']} — {d} days since applied. Follow up now!")
     else:
-        st.success("✅ No follow-ups due right now.")
+        st.success("✅ No follow-ups overdue.")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE: FIND JOBS
-# ══════════════════════════════════════════════════════════════════════════════
+# ══ FIND JOBS ════════════════════════════════════════════════════════════════
 elif page == "🔍 Find Jobs":
-    st.markdown('<div class="section-title">🔍 Find Jobs</div>', unsafe_allow_html=True)
-
-    # ── HOW IT WORKS NOTICE ───────────────────────────────────────────────────
-    st.markdown("""
-    <div class="ai-job-notice">
-    ℹ️ <strong>How this works:</strong> Job portals (Naukri, Indeed) block automated scraping.
-    Instead, this app uses <strong>Claude AI</strong> to generate realistic, tailored job leads based on your profile and current market knowledge —
-    then gives you <strong>one-click search links</strong> to find and apply on each portal directly.
-    </div>
-    """, unsafe_allow_html=True)
-
-    col1, col2, col3 = st.columns([2, 1, 1])
-    with col1:
-        role_filter = st.selectbox("Job Role Category", list(SEARCH_QUERIES.keys()))
-    with col2:
-        num_jobs = st.selectbox("Jobs to generate", [4, 6, 8, 10], index=1)
-    with col3:
-        custom_query = st.text_input("Custom focus (optional)", placeholder="e.g. VP Operations")
+    st.markdown('<div class="section-title">🔍 Find Jobs via Claude AI Search</div>', unsafe_allow_html=True)
 
     if not st.session_state.api_key and not st.secrets.get("ANTHROPIC_API_KEY",""):
-        st.warning("⚠️ Add your Anthropic API key in the sidebar to generate AI job leads.")
+        st.error("⚠️ Add your Anthropic API key in the sidebar first!")
+        st.stop()
 
-    search_btn = st.button("🤖 Generate AI Job Leads", use_container_width=True, type="primary")
+    st.info("💡 **How this works:** Claude uses its built-in web search to find real, live jobs from Naukri, LinkedIn and Indeed — using your existing API key. No extra cost, no extra accounts needed.")
 
-    # ── QUICK PORTAL LINKS ────────────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown("### 🔗 Search Live on Job Portals")
-    st.markdown("*Click to open real-time search in a new tab:*")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        role_options = {
+            "AGM / DGM Production Planning":    "AGM DGM production planning India",
+            "Supply Chain Manager / Head SCM":  "supply chain manager head SCM HVAC India",
+            "SAP PP Consultant / Lead":         "SAP PP functional consultant lead India",
+            "Manager PPC / Head PPC":           "manager head PPC production planning control India",
+            "All roles (broad search)":         "AGM production planning supply chain SAP PP India",
+        }
+        role = st.selectbox("Target Role", list(role_options.keys()))
+    with col2:
+        location = st.text_input("Location", value="Delhi NCR / Greater Noida")
 
-    queries = SEARCH_QUERIES.get(role_filter, [])
-    if custom_query:
-        queries = [custom_query] + queries
+    custom = st.text_input("Custom search query (optional)", placeholder="e.g. VP Operations HVAC India")
+    num = st.slider("Number of jobs to find", 5, 20, 10)
+    auto_score = st.checkbox("Auto-score matches with AI", value=True)
 
-    for q in queries[:3]:
-        with st.container():
-            st.markdown(f'<div class="portal-link-box"><strong>🔍 "{q}"</strong></div>', unsafe_allow_html=True)
-            lc = st.columns(5)
-            with lc[0]:
-                st.markdown(f'<a href="{get_naukri_url(q)}" target="_blank"><button style="width:100%;padding:0.4rem;background:#f06a20;color:white;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem">Naukri 🔗</button></a>', unsafe_allow_html=True)
-            with lc[1]:
-                st.markdown(f'<a href="{get_indeed_url(q)}" target="_blank"><button style="width:100%;padding:0.4rem;background:#2557a7;color:white;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem">Indeed 🔗</button></a>', unsafe_allow_html=True)
-            with lc[2]:
-                st.markdown(f'<a href="{get_linkedin_url(q)}" target="_blank"><button style="width:100%;padding:0.4rem;background:#0077b5;color:white;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem">LinkedIn 🔗</button></a>', unsafe_allow_html=True)
-            with lc[3]:
-                st.markdown(f'<a href="{get_foundit_url(q)}" target="_blank"><button style="width:100%;padding:0.4rem;background:#e84141;color:white;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem">Foundit 🔗</button></a>', unsafe_allow_html=True)
-            with lc[4]:
-                st.markdown(f'<a href="{get_shine_url(q)}" target="_blank"><button style="width:100%;padding:0.4rem;background:#00b28a;color:white;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem">Shine 🔗</button></a>', unsafe_allow_html=True)
+    if st.button("🔍 Search Jobs with Claude AI", type="primary", use_container_width=True):
+        query = custom if custom else role_options[role]
+        with st.spinner(f"🤖 Claude is searching Naukri, LinkedIn & Indeed for '{query}'..."):
+            jobs, error = search_jobs_with_claude(query, location, num)
 
-    # ── AI JOB GENERATION ────────────────────────────────────────────────────
-    if search_btn:
-        queries_to_use = SEARCH_QUERIES.get(role_filter, [])
-        if custom_query:
-            queries_to_use = [custom_query] + queries_to_use
-
-        with st.spinner("🤖 Claude is generating tailored job leads for your profile..."):
-            generated = ai_generate_jobs(role_filter, queries_to_use, num_jobs=num_jobs)
-
-        if generated:
-            st.session_state.jobs = generated
-            st.success(f"✅ Generated {len(generated)} job leads! Each card has direct search links to find & apply.")
+        if error:
+            st.error(f"Search error: {error}")
+        elif not jobs:
+            st.warning("No jobs found. Try a different search query or broader role.")
         else:
-            st.error("Could not generate jobs. Check your API key in the sidebar.")
+            if auto_score:
+                prog = st.progress(0, text="Scoring jobs with AI...")
+                for i, job in enumerate(jobs):
+                    result = ai_match_job(job["title"], job["company"], job.get("description",""))
+                    jobs[i]["match_score"]  = result.get("score", 50)
+                    jobs[i]["match_reason"] = result.get("verdict", "")
+                    jobs[i]["strengths"]    = result.get("strengths", [])
+                    jobs[i]["gaps"]         = result.get("gaps", [])
+                    prog.progress((i+1)/len(jobs), text=f"Scoring {i+1}/{len(jobs)}...")
+                    time.sleep(0.2)
+                prog.empty()
 
-    # ── DISPLAY JOB CARDS ────────────────────────────────────────────────────
+            st.session_state.jobs = jobs
+            st.success(f"✅ Found {len(jobs)} jobs!")
+
+    # ── Display results ───────────────────────────────────────────────────────
     if st.session_state.jobs:
-        st.markdown("---")
-        st.markdown(f"### 📋 {len(st.session_state.jobs)} Job Leads — AI Generated & Pre-Scored")
+        jobs = sorted(st.session_state.jobs, key=lambda x: x.get("match_score") or 0, reverse=True)
+        min_score = st.slider("Filter: minimum match score", 0, 100, 0, 5)
+        jobs = [j for j in jobs if (j.get("match_score") or 0) >= min_score]
 
-        if any(j.get("ai_generated") for j in st.session_state.jobs):
-            st.info("💡 These jobs are AI-generated leads based on your profile. Use the **Search on Portal** buttons to find and verify real listings.")
+        st.markdown(f"**Showing {len(jobs)} jobs** sorted by match score")
 
-        score_filter = st.slider("Minimum match score", 0, 100, 0, 5)
-        display_jobs = [j for j in st.session_state.jobs if (j.get("match_score") or 0) >= score_filter]
-        display_jobs = sorted(display_jobs, key=lambda x: x.get("match_score") or 0, reverse=True)
+        for j in jobs:
+            sc   = j.get("match_score")
+            icon = "🟢" if (sc or 0)>=70 else ("🟡" if (sc or 0)>=50 else "🔴")
+            cls  = "match-high" if (sc or 0)>=70 else ("match-medium" if (sc or 0)>=50 else "match-low")
 
-        for j in display_jobs:
-            score = j.get("match_score", 0)
-            if score >= 70:
-                badge_html = f'<span class="match-badge match-high">{score}% ✓ Strong</span>'
-            elif score >= 50:
-                badge_html = f'<span class="match-badge match-medium">{score}% ~ Fair</span>'
-            else:
-                badge_html = f'<span class="match-badge match-low">{score}% ✗ Low</span>'
-
-            with st.expander(f"**{j['title']}** — {j['company']} | {j.get('salary','Competitive')} | {score}% match"):
-                c_left, c_right = st.columns([3, 1])
-                with c_left:
+            with st.expander(f"{icon} **{j['title']}** — {j['company']} | {j['source']} {f'| {sc}% match' if sc else ''}"):
+                cl, cr = st.columns([3,1])
+                with cl:
                     st.markdown(f"**Company:** {j['company']}")
-                    st.markdown(f"**Location:** {j['location']}")
-                    st.markdown(f"**Experience:** {j.get('experience','Not specified')}")
-                    st.markdown(f"**Salary:** {j.get('salary','Competitive')}")
+                    st.markdown(f"**Location:** {j['location']}  |  **Experience:** {j.get('experience','N/A')}")
+                    st.markdown(f"**Source:** {j['source']}")
                     if j.get("description"):
-                        st.markdown(f"**About Role:** {j['description']}")
-                    if j.get("key_skills"):
-                        st.markdown(f"**Key Skills:** {', '.join(j['key_skills'])}")
+                        st.markdown(f"**About role:** {j['description']}")
                     if j.get("match_reason"):
-                        st.markdown(f"**AI Verdict:** _{j['match_reason']}_")
-                    if j.get("strengths"):
-                        st.markdown("**Your strengths for this role:**")
-                        for s in j["strengths"]:
-                            st.markdown(f"  ✅ {s}")
-                    if j.get("gaps"):
-                        st.markdown("**Potential gaps:**")
-                        for g in j["gaps"]:
-                            st.markdown(f"  ⚠️ {g}")
+                        st.markdown(f"**AI verdict:** {j['match_reason']}")
+                    for s in j.get("strengths", []):
+                        st.success(f"✅ {s}")
+                    for g in j.get("gaps", []):
+                        st.warning(f"⚠️ {g}")
+                with cr:
+                    if sc:
+                        st.markdown(f'<span class="{cls}">{sc}% match</span>', unsafe_allow_html=True)
+                    if j.get("url") and j["url"] != "#":
+                        st.link_button("🔗 Open & Apply", j["url"], use_container_width=True)
 
-                with c_right:
-                    st.markdown(badge_html, unsafe_allow_html=True)
-                    st.markdown("**Find this job on:**")
-
-                    search_q = f"{j['title']} {j['company']}"
-                    naukri_url  = j.get("url_naukri",  get_naukri_url(j['title']))
-                    indeed_url  = j.get("url_indeed",  get_indeed_url(search_q))
-                    linkedin_url= j.get("url_linkedin", get_linkedin_url(search_q))
-                    foundit_url = j.get("url_foundit",  get_foundit_url(j['title']))
-
-                    st.markdown(f'<a href="{naukri_url}"   target="_blank"><button style="width:100%;margin:2px 0;padding:0.35rem;background:#f06a20;color:white;border:none;border-radius:5px;cursor:pointer;font-size:0.8rem">🔍 Naukri</button></a>',   unsafe_allow_html=True)
-                    st.markdown(f'<a href="{linkedin_url}" target="_blank"><button style="width:100%;margin:2px 0;padding:0.35rem;background:#0077b5;color:white;border:none;border-radius:5px;cursor:pointer;font-size:0.8rem">🔍 LinkedIn</button></a>', unsafe_allow_html=True)
-                    st.markdown(f'<a href="{indeed_url}"   target="_blank"><button style="width:100%;margin:2px 0;padding:0.35rem;background:#2557a7;color:white;border:none;border-radius:5px;cursor:pointer;font-size:0.8rem">🔍 Indeed</button></a>',   unsafe_allow_html=True)
-                    st.markdown(f'<a href="{foundit_url}"  target="_blank"><button style="width:100%;margin:2px 0;padding:0.35rem;background:#e84141;color:white;border:none;border-radius:5px;cursor:pointer;font-size:0.8rem">🔍 Foundit</button></a>',  unsafe_allow_html=True)
-
-                    st.markdown("<br>", unsafe_allow_html=True)
                     if st.button("✍️ Cover Letter", key=f"cl_{j['id']}"):
-                        with st.spinner("Writing cover letter..."):
+                        with st.spinner("Writing..."):
                             letter = ai_cover_letter(j["title"], j["company"], j.get("description",""))
                         st.session_state.cover_letter = letter
-                        st.session_state.match_result = j
-                        st.success("Ready! Go to **AI Match & Apply** tab.")
+                        st.success("Ready! Go to AI Match & Apply tab.")
 
-                    if st.button("✅ Add to Tracker", key=f"app_{j['id']}"):
-                        new_app = {**j, "status": "Saved", "applied_date": None, "notes": ""}
-                        st.session_state.applications.append(new_app)
-                        st.success("Added to tracker!")
+                    if st.button("✅ Mark Applied", key=f"ap_{j['id']}"):
+                        new = {**j, "status":"Applied", "applied_date": date.today().strftime("%Y-%m-%d"), "notes":""}
+                        st.session_state.applications.append(new)
+                        st.success("Tracked!")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE: AI MATCH & APPLY
-# ══════════════════════════════════════════════════════════════════════════════
+# ══ AI MATCH & APPLY ═════════════════════════════════════════════════════════
 elif page == "🤖 AI Match & Apply":
-    st.markdown('<div class="section-title">🤖 AI Match & Cover Letter Generator</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">🤖 AI Match Score & Cover Letter</div>', unsafe_allow_html=True)
 
-    if not st.session_state.api_key:
-        st.warning("⚠️ Add your Anthropic API key in the sidebar first! Get a free key at console.anthropic.com")
+    if not st.session_state.api_key and not st.secrets.get("ANTHROPIC_API_KEY",""):
+        st.warning("⚠️ Add your API key in the sidebar.")
 
-    tab1, tab2 = st.tabs(["📝 Manual Job Entry", "📋 From Job List"])
+    tab1, tab2 = st.tabs(["📝 Enter Job Manually", "📋 From Search Results"])
 
     with tab1:
-        st.markdown("**Enter job details manually (e.g. copied from LinkedIn / Naukri)**")
-        col1, col2 = st.columns(2)
-        with col1:
-            jt = st.text_input("Job Title", placeholder="AGM Production Planning")
-            jc = st.text_input("Company Name", placeholder="Voltas Ltd")
-        with col2:
-            jl = st.text_input("Location", placeholder="Greater Noida / Delhi NCR")
-            js = st.text_input("Source / URL", placeholder="https://naukri.com/job/...")
+        c1, c2 = st.columns(2)
+        with c1:
+            jt = st.text_input("Job Title *", placeholder="AGM Production Planning")
+            jc = st.text_input("Company *",   placeholder="Voltas Ltd")
+        with c2:
+            jl = st.text_input("Location",    placeholder="Delhi NCR")
+            ju = st.text_input("Job URL",      placeholder="https://naukri.com/job/...")
+        jd = st.text_area("Paste Job Description (for better accuracy)", height=120)
 
-        jd = st.text_area("Job Description (paste here for better matching)",
-                           height=150, placeholder="Paste the full job description here for most accurate AI matching...")
-
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            if st.button("🎯 Score My Match", use_container_width=True, type="primary"):
+        b1, b2, b3 = st.columns(3)
+        with b1:
+            if st.button("🎯 Score My Match", type="primary", use_container_width=True):
                 if jt and jc:
-                    with st.spinner("Analysing match..."):
-                        result = ai_match_job(jt, jc, jd)
-                    score = result.get("score", 0)
-                    badge = "match-high" if score >= 70 else ("match-medium" if score >= 50 else "match-low")
-                    st.markdown(f"""
-                    <div class="job-card">
-                      <h4>{jt}</h4>
-                      <span class="company">{jc}</span>
-                      <span class="match-badge {badge}" style="float:right">{score}% match</span>
-                      <div class="meta" style="margin-top:0.5rem">{result.get('verdict','')}</div>
+                    with st.spinner("Analysing..."):
+                        r = ai_match_job(jt, jc, jd)
+                    sc = r.get("score", 0)
+                    cls = "match-high" if sc>=70 else ("match-medium" if sc>=50 else "match-low")
+                    st.markdown(f"""<div class="job-card">
+                      <b>{jt}</b> <span class="{cls}" style="float:right">{sc}% match</span><br>
+                      <i>{r.get('verdict','')}</i>
                     </div>""", unsafe_allow_html=True)
-
-                    if result.get("strengths"):
-                        st.markdown("**Your strengths:**")
-                        for s in result["strengths"]: st.success(f"✅ {s}")
-                    if result.get("gaps"):
-                        st.markdown("**Potential gaps:**")
-                        for g in result["gaps"]: st.warning(f"⚠️ {g}")
-        with col_btn2:
-            if st.button("✍️ Generate Cover Letter", use_container_width=True):
+                    for s in r.get("strengths",[]): st.success(f"✅ {s}")
+                    for g in r.get("gaps",[]): st.warning(f"⚠️ {g}")
+        with b2:
+            if st.button("✍️ Cover Letter", use_container_width=True):
                 if jt and jc:
-                    with st.spinner("Writing tailored cover letter..."):
-                        letter = ai_cover_letter(jt, jc, jd)
-                    st.session_state.cover_letter = letter
-
-        if st.button("➕ Add to Tracker", use_container_width=True) and jt and jc:
-            new_app = {
-                "id": f"MAN-{hash(jt+jc)}",
-                "title": jt, "company": jc, "location": jl,
-                "source": js or "Manual", "url": js,
-                "status": "Saved", "applied_date": None,
-                "match_score": None, "match_reason": "", "notes": "",
-                "cover_letter": st.session_state.cover_letter,
-            }
-            st.session_state.applications.append(new_app)
-            st.success("✅ Added to Applications Tracker!")
+                    with st.spinner("Writing..."):
+                        st.session_state.cover_letter = ai_cover_letter(jt, jc, jd)
+        with b3:
+            if st.button("➕ Add to Tracker", use_container_width=True):
+                if jt and jc:
+                    st.session_state.applications.append({
+                        "id": f"MAN-{int(time.time())}", "title": jt, "company": jc,
+                        "location": jl, "source": ju or "Manual", "url": ju,
+                        "status": "Saved", "applied_date": None,
+                        "match_score": None, "cover_letter": st.session_state.cover_letter, "notes": ""
+                    })
+                    st.success("Added to tracker!")
 
     with tab2:
-        scored_jobs = [j for j in st.session_state.jobs if j.get("match_score", 0) >= 60]
-        if not scored_jobs:
-            st.info("No jobs yet. Go to **Find Jobs** and generate job leads first.")
+        scored = [j for j in st.session_state.jobs if (j.get("match_score") or 0) >= 50]
+        if not scored:
+            st.info("Search for jobs first, then come here to generate cover letters.")
         else:
-            selected = st.selectbox("Pick a job",
-                                    [f"{j['title']} — {j['company']} ({j.get('match_score',0)}%)" for j in scored_jobs])
-            idx = [f"{j['title']} — {j['company']} ({j.get('match_score',0)}%)" for j in scored_jobs].index(selected)
-            job = scored_jobs[idx]
-
-            if st.button("✍️ Generate Cover Letter for This Job", type="primary"):
-                with st.spinner("Writing cover letter..."):
-                    letter = ai_cover_letter(job["title"], job["company"], job.get("description",""))
-                st.session_state.cover_letter = letter
+            sel = st.selectbox("Pick a job", [f"{j['title']} — {j['company']} ({j.get('match_score',0)}%)" for j in scored])
+            idx = [f"{j['title']} — {j['company']} ({j.get('match_score',0)}%)" for j in scored].index(sel)
+            job = scored[idx]
+            if st.button("✍️ Generate Cover Letter", type="primary"):
+                with st.spinner("Writing tailored cover letter..."):
+                    st.session_state.cover_letter = ai_cover_letter(job["title"], job["company"], job.get("description",""))
 
     # Cover letter display
     if st.session_state.cover_letter:
         st.markdown("---")
-        st.markdown('<div class="section-title">📄 Generated Cover Letter</div>', unsafe_allow_html=True)
-        edited = st.text_area("Edit if needed:", value=st.session_state.cover_letter, height=320)
+        st.markdown('<div class="section-title">📄 Your Cover Letter</div>', unsafe_allow_html=True)
+        edited = st.text_area("Edit if needed:", value=st.session_state.cover_letter, height=300)
         st.session_state.cover_letter = edited
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.download_button("⬇️ Download Cover Letter",
-                               data=edited, file_name="cover_letter_himanshu.txt",
-                               mime="text/plain", use_container_width=True)
-        with col2:
-            if st.button("📋 Copy to Clipboard (select all)", use_container_width=True):
-                st.info("Select all text in the box above and copy (Ctrl+A, Ctrl+C)")
-        with col3:
+        c1, c2 = st.columns(2)
+        with c1:
+            st.download_button("⬇️ Download", data=edited, file_name="cover_letter_himanshu.txt", use_container_width=True)
+        with c2:
             if st.button("🔄 Regenerate", use_container_width=True):
                 st.session_state.cover_letter = ""
                 st.rerun()
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE: APPLICATIONS TRACKER
-# ══════════════════════════════════════════════════════════════════════════════
-elif page == "📋 Applications Tracker":
+# ══ TRACKER ══════════════════════════════════════════════════════════════════
+elif page == "📋 Tracker":
     st.markdown('<div class="section-title">📋 Applications Tracker</div>', unsafe_allow_html=True)
 
     with st.expander("➕ Add Application Manually"):
         c1, c2, c3 = st.columns(3)
         with c1:
-            m_title   = st.text_input("Job Title", key="m_title")
-            m_company = st.text_input("Company",   key="m_company")
+            mt = st.text_input("Job Title", key="mt")
+            mc = st.text_input("Company",   key="mc")
         with c2:
-            m_loc     = st.text_input("Location",  key="m_loc")
-            m_source  = st.text_input("Source/URL", key="m_source")
+            ml = st.text_input("Location",  key="ml")
+            ms = st.selectbox("Status", ["Saved","Applied","Interview","Offer","Rejected"], key="ms")
         with c3:
-            m_status  = st.selectbox("Status", ["Saved","Applied","Interview","Offer","Rejected"], key="m_status")
-            m_date    = st.date_input("Applied Date", key="m_date")
-        m_notes = st.text_area("Notes", key="m_notes", height=60)
-        if st.button("Add Application"):
+            md = st.date_input("Date Applied", key="md")
+            mu = st.text_input("URL / Source",  key="mu")
+        mn = st.text_area("Notes", key="mn", height=50)
+        if st.button("Add"):
             st.session_state.applications.append({
-                "id": f"MAN-{int(time.time())}",
-                "title": m_title, "company": m_company,
-                "location": m_loc, "source": m_source, "url": m_source,
-                "status": m_status, "applied_date": str(m_date),
-                "match_score": None, "match_reason": "", "notes": m_notes,
-                "cover_letter": "",
+                "id": f"M-{int(time.time())}", "title": mt, "company": mc,
+                "location": ml, "source": mu, "url": mu,
+                "status": ms, "applied_date": str(md), "notes": mn,
+                "match_score": None, "cover_letter": ""
             })
-            st.success("Application added!")
-            st.rerun()
+            st.success("Added!"); st.rerun()
 
     apps = st.session_state.applications
     if not apps:
-        st.info("📭 No applications tracked yet. Find jobs and click **Add to Tracker**!")
+        st.info("No applications yet. Find jobs and click **Mark Applied**!")
     else:
-        f1, f2 = st.columns(2)
-        with f1:
-            status_filter = st.multiselect("Filter by status",
-                                           ["Saved","Applied","Interview","Offer","Rejected"],
-                                           default=["Saved","Applied","Interview","Offer","Rejected"])
-        with f2:
-            sort_by = st.selectbox("Sort by", ["Date Applied","Match Score","Company"])
+        sf = st.multiselect("Filter status", ["Saved","Applied","Interview","Offer","Rejected"],
+                            default=["Saved","Applied","Interview","Offer","Rejected"])
+        filtered = [a for a in apps if a.get("status","Saved") in sf]
 
-        filtered = [a for a in apps if a.get("status","Saved") in status_filter]
+        df = pd.DataFrame([{
+            "Title":    a.get("title",""), "Company": a.get("company",""),
+            "Status":   a.get("status",""), "Applied": a.get("applied_date",""),
+            "Match %":  a.get("match_score",""), "Source": a.get("source",""),
+        } for a in filtered])
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.download_button("⬇️ Export CSV", data=df.to_csv(index=False),
+                           file_name="applications_himanshu.csv", mime="text/csv")
 
-        if sort_by == "Match Score":
-            filtered = sorted(filtered, key=lambda x: x.get("match_score") or 0, reverse=True)
-        elif sort_by == "Company":
-            filtered = sorted(filtered, key=lambda x: x.get("company",""))
-        else:
-            filtered = sorted(filtered, key=lambda x: x.get("applied_date") or "0000", reverse=True)
-
-        if filtered:
-            df = pd.DataFrame([{
-                "Title":    a.get("title",""),
-                "Company":  a.get("company",""),
-                "Location": a.get("location",""),
-                "Status":   a.get("status","Saved"),
-                "Applied":  a.get("applied_date",""),
-                "Match %":  a.get("match_score",""),
-                "Source":   a.get("source",""),
-            } for a in filtered])
-            st.dataframe(df, use_container_width=True, hide_index=True)
-
-            csv = df.to_csv(index=False)
-            st.download_button("⬇️ Export to CSV", data=csv,
-                               file_name="job_applications_himanshu.csv",
-                               mime="text/csv")
-
-        st.markdown("---")
-        st.markdown("**Update Application Status**")
-        if filtered:
-            options = [f"{a['title']} — {a['company']}" for a in filtered]
-            sel_idx  = st.selectbox("Select application", range(len(options)),
-                                    format_func=lambda i: options[i])
-            new_status = st.selectbox("New status", ["Saved","Applied","Interview","Offer","Rejected"])
-            new_notes  = st.text_input("Add notes")
-            if st.button("Update Status"):
-                orig_idx = apps.index(filtered[sel_idx])
-                st.session_state.applications[orig_idx]["status"] = new_status
-                if new_notes:
-                    st.session_state.applications[orig_idx]["notes"] = new_notes
-                if new_status == "Applied" and not apps[orig_idx].get("applied_date"):
-                    st.session_state.applications[orig_idx]["applied_date"] = date.today().strftime("%Y-%m-%d")
-                st.success("✅ Updated!")
-                st.rerun()
+        st.markdown("**Update Status**")
+        opts = [f"{a['title']} — {a['company']}" for a in filtered]
+        if opts:
+            si = st.selectbox("Select", range(len(opts)), format_func=lambda i: opts[i])
+            ns = st.selectbox("New status", ["Saved","Applied","Interview","Offer","Rejected"])
+            nn = st.text_input("Notes (optional)")
+            if st.button("Update"):
+                oi = apps.index(filtered[si])
+                st.session_state.applications[oi]["status"] = ns
+                if nn: st.session_state.applications[oi]["notes"] = nn
+                if ns == "Applied" and not apps[oi].get("applied_date"):
+                    st.session_state.applications[oi]["applied_date"] = date.today().strftime("%Y-%m-%d")
+                st.success("Updated!"); st.rerun()
 
         if len(apps) > 1:
-            st.markdown("---")
-            col1, col2 = st.columns(2)
-            with col1:
-                status_df = pd.Series([a["status"] for a in apps]).value_counts().reset_index()
-                status_df.columns = ["Status","Count"]
-                fig = px.pie(status_df, names="Status", values="Count",
-                             title="Applications by Status",
-                             color_discrete_sequence=px.colors.qualitative.Set2)
-                fig.update_layout(height=300, margin=dict(t=40,b=0))
-                st.plotly_chart(fig, use_container_width=True)
-            with col2:
-                src_df = pd.Series([a["source"] for a in apps]).value_counts().reset_index()
-                src_df.columns = ["Source","Count"]
-                fig2 = px.bar(src_df, x="Source", y="Count", title="Applications by Source",
-                              color="Count", color_continuous_scale="Blues")
-                fig2.update_layout(height=300, margin=dict(t=40,b=0), showlegend=False)
-                st.plotly_chart(fig2, use_container_width=True)
+            c1, c2 = st.columns(2)
+            with c1:
+                df2 = pd.Series([a["status"] for a in apps]).value_counts().reset_index()
+                df2.columns = ["Status","Count"]
+                st.plotly_chart(px.pie(df2, names="Status", values="Count", height=280,
+                    title="By Status"), use_container_width=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE: SETTINGS
-# ══════════════════════════════════════════════════════════════════════════════
+# ══ SETTINGS ═════════════════════════════════════════════════════════════════
 elif page == "⚙️ Settings":
-    st.markdown('<div class="section-title">⚙️ Settings & Info</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">⚙️ Settings</div>', unsafe_allow_html=True)
+    t1, t2 = st.tabs(["🔑 API Key & Cost", "🔒 Security"])
 
-    tab1, tab2, tab3 = st.tabs(["🔑 API Key", "📄 Resume Profile", "ℹ️ How to Deploy"])
-
-    with tab1:
-        st.markdown("### Anthropic API Key")
+    with t1:
         st.markdown("""
-        **How to get your free API key:**
-        1. Go to [console.anthropic.com](https://console.anthropic.com)
-        2. Sign up with your email
-        3. Go to **API Keys** → **Create Key**
-        4. Copy the key (starts with `sk-ant-...`)
-        5. Paste it in the sidebar
+### Your $5 Claude API Key — Cost Breakdown
 
-        **Cost estimate for this app:**
-        - AI Job Lead Generation (Haiku): ~₹0.50–1 per search (12 jobs)
-        - Cover letter (Sonnet): ~₹1–2 per letter
-        - Free credits on signup: **$5 ≈ ₹415** → enough for 200+ cover letters
+| Action | Model Used | Cost per use |
+|---|---|---|
+| Search jobs (web search) | claude-sonnet-4-6 | ~₹2–4 per search |
+| Score 10 jobs (match %) | claude-haiku | ~₹0.30 per job |
+| Generate cover letter | claude-sonnet-4-6 | ~₹1–2 per letter |
+
+**Your $5 free credit (≈ ₹415) gives you:**
+- ~50–80 job searches
+- ~500 job match scores
+- ~200 cover letters
+
+That's enough for a **full 2–3 month job hunt** at no extra cost.
+
+**To add your key securely on Streamlit Cloud:**
+1. Streamlit Cloud → your app → **Settings** → **Secrets**
+2. Add: `ANTHROPIC_API_KEY = "sk-ant-your-key-here"`
+3. Never paste your key in public screenshots!
         """)
-        key_val = st.text_input("Your API Key", type="password", value=st.session_state.api_key)
-        if key_val:
-            st.session_state.api_key = key_val
-            if st.button("Test API Key"):
-                try:
-                    client = anthropic.Anthropic(api_key=key_val)
-                    client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=10,
-                                           messages=[{"role":"user","content":"Hi"}])
-                    st.success("✅ API key works!")
-                except Exception as e:
-                    st.error(f"❌ Key error: {e}")
+        key = st.text_input("Test your key here", type="password")
+        if key and st.button("Test Connection"):
+            try:
+                c = anthropic.Anthropic(api_key=key)
+                c.messages.create(model="claude-haiku-4-5-20251001", max_tokens=10,
+                                  messages=[{"role":"user","content":"hi"}])
+                st.success("✅ API key works perfectly!")
+            except Exception as e:
+                st.error(f"❌ {e}")
 
-    with tab2:
-        st.markdown("### Your Resume Profile")
-        st.markdown("*This is what the AI uses to generate jobs, score matches, and write cover letters.*")
-        st.code(RESUME_SUMMARY, language="text")
-        st.info("To customise this, edit the `RESUME_SUMMARY` variable in `app.py`")
-
-    with tab3:
-        st.markdown("### 🚀 How to Deploy on Streamlit Cloud (Free)")
+    with t2:
         st.markdown("""
-        **requirements.txt** (make sure it includes these — remove requests/beautifulsoup4):
-        ```
-        streamlit
-        anthropic
-        pandas
-        plotly
-        python-dateutil
-        ```
+### Security Checklist
 
-        **Step 1 — Push to GitHub:**
-        ```bash
-        git add app.py requirements.txt
-        git commit -m "Fix: replaced broken scrapers with AI job generation"
-        git push
-        ```
+| Item | Status | Action |
+|---|---|---|
+| API key in Streamlit Secrets | ✅ Safe | Not in code |
+| GitHub repo visibility | ⚠️ Check | Set to **Private** |
+| App password protection | ⚠️ Optional | Add login below |
+| Data persistence | ⚠️ None | Export CSV regularly |
 
-        **Step 2 — Streamlit Cloud auto-redeploys** if already connected.
-
-        **Step 3 — Secrets** (Streamlit Cloud → Settings → Secrets):
-        ```
-        ANTHROPIC_API_KEY = "sk-ant-your-key-here"
-        APP_PASSWORD = "himanshu2040"
-        ```
+### Add Password Protection (paste at top of app.py)
+```python
+def check_password():
+    if not st.session_state.get("authenticated"):
+        st.title("🔒 Login")
+        pwd = st.text_input("Password", type="password")
+        if st.button("Login"):
+            if pwd == st.secrets.get("APP_PASSWORD", ""):
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("Wrong password")
+        st.stop()
+check_password()
+```
+Then add `APP_PASSWORD = "YourPassword"` in Streamlit Secrets.
         """)
