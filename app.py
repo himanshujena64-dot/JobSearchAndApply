@@ -76,35 +76,14 @@ def search_jobs_with_claude(query, location="India", num_jobs=10, max_days=15):
     today_str  = date.today().strftime("%d %B %Y")
     cutoff_str = (date.today() - timedelta(days=max_days)).strftime("%d %B %Y")
 
-    system_prompt = """You are a job search assistant specialising in FRESH job postings only.
-You MUST only return jobs posted within the last 15 days — never older.
-After searching, respond with a JSON array only — no other text."""
+    system_prompt = "Find fresh jobs posted in last {max_days} days only. Respond with JSON array only, no other text.".format(max_days=max_days)
 
-    user_prompt = f"""Today is {today_str}. Find jobs posted between {cutoff_str} and {today_str} (last {max_days} days ONLY).
-
-Search query: "{query}"
-Location: {location}
-
-Search these portals using their freshness filters:
-- Naukri.com  → add &jobAge={max_days} to URL (last {max_days} days)
-- LinkedIn    → filter "Date Posted: Past 2 weeks"
-- Indeed India → add &fromage=15 to URL (last 15 days)
-
-STRICT RULE: Skip any job you cannot confirm was posted within {max_days} days.
-
-Find {num_jobs} fresh jobs. Return ONLY this JSON array, nothing else:
-[
-  {{
-    "title": "AGM Production Planning",
-    "company": "Voltas Ltd",
-    "location": "Delhi NCR",
-    "experience": "12-15 years",
-    "source": "Naukri",
-    "url": "https://www.naukri.com/job-listings-...",
-    "posted_date": "3 days ago",
-    "description": "Leading production planning for AC division..."
-  }}
-]"""
+    user_prompt = f"""Today: {today_str}. Find {num_jobs} jobs posted in last {max_days} days.
+Query: "{query}", Location: {location}
+Search: Naukri (jobAge={max_days}), LinkedIn (past 2 weeks), Indeed (fromage={max_days}).
+Skip jobs older than {max_days} days.
+Return ONLY JSON array:
+[{{"title":"...","company":"...","location":"...","experience":"...","source":"Naukri/LinkedIn/Indeed","url":"https://...","posted_date":"X days ago","description":"..."}}]"""
 
     messages = [{"role": "user", "content": user_prompt}]
 
@@ -113,8 +92,8 @@ Find {num_jobs} fresh jobs. Return ONLY this JSON array, nothing else:
         max_turns = 5
         for turn in range(max_turns):
             response = client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=4000,
+                model="claude-haiku-4-5-20251001",
+                max_tokens=2000,
                 system=system_prompt,
                 tools=[{"type": "web_search_20250305", "name": "web_search"}],
                 messages=messages,
@@ -218,8 +197,14 @@ Find {num_jobs} fresh jobs. Return ONLY this JSON array, nothing else:
 
         return jobs, None if jobs else ([], "No jobs parsed from response")
 
+    except anthropic.RateLimitError:
+        time.sleep(10)
+        return search_jobs_without_websearch(query, location, num_jobs)
     except anthropic.APIStatusError as e:
         if "web_search" in str(e).lower() or "tool" in str(e).lower():
+            return search_jobs_without_websearch(query, location, num_jobs)
+        if "rate_limit" in str(e).lower() or "429" in str(e):
+            time.sleep(10)
             return search_jobs_without_websearch(query, location, num_jobs)
         return [], f"API error: {e.message}"
     except Exception as e:
@@ -268,8 +253,8 @@ def search_jobs_without_websearch(query, location, num_jobs):
         return [], "No API key"
     try:
         msg = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=2000,
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1500,
             messages=[{"role": "user", "content": f"""List {num_jobs} realistic RECENT job opportunities (posted in last 15 days) for: "{query}" in {location}.
 Focus on companies in HVAC, automotive, consumer durables that typically hire for these roles.
 
@@ -457,7 +442,8 @@ elif page == "🔍 Find Jobs":
 
     if st.button("🔍 Search Jobs with Claude AI", type="primary", use_container_width=True):
         query = custom if custom else role_options[role]
-        with st.spinner(f"🤖 Claude is searching for jobs posted in last {max_days} days..."):
+        st.info("⏳ Searching... this takes 15–30 seconds as Claude reads Naukri, LinkedIn & Indeed for you.")
+        with st.spinner(f"🤖 Finding jobs posted in last {max_days} days..."):
             jobs, error = search_jobs_with_claude(query, location, num, max_days)
 
         if error:
