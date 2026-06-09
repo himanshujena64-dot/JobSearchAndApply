@@ -66,21 +66,33 @@ def get_client():
     return anthropic.Anthropic(api_key=key) if key else None
 
 # ── CORE: SEARCH JOBS USING CLAUDE WEB SEARCH ─────────────────────────────────
-def search_jobs_with_claude(query, location="India", num_jobs=10):
+def search_jobs_with_claude(query, location="India", num_jobs=10, max_days=15):
     """Use Claude's web_search tool to find real jobs — handles multi-turn tool use."""
     client = get_client()
     if not client:
         return [], "No API key"
 
-    system_prompt = """You are a job search assistant. When asked to find jobs, 
-use web search to find real current job postings. After searching, always respond 
-with a JSON array of jobs found. Format your final response as valid JSON only."""
+    from datetime import timedelta
+    today_str  = date.today().strftime("%d %B %Y")
+    cutoff_str = (date.today() - timedelta(days=max_days)).strftime("%d %B %Y")
 
-    user_prompt = f"""Search for current job openings for: "{query}" in {location}.
+    system_prompt = """You are a job search assistant specialising in FRESH job postings only.
+You MUST only return jobs posted within the last 15 days — never older.
+After searching, respond with a JSON array only — no other text."""
 
-Search Naukri.com, LinkedIn Jobs, and Indeed India. Find {num_jobs} real open positions.
+    user_prompt = f"""Today is {today_str}. Find jobs posted between {cutoff_str} and {today_str} (last {max_days} days ONLY).
 
-After searching, respond with ONLY a JSON array like this (no other text):
+Search query: "{query}"
+Location: {location}
+
+Search these portals using their freshness filters:
+- Naukri.com  → add &jobAge={max_days} to URL (last {max_days} days)
+- LinkedIn    → filter "Date Posted: Past 2 weeks"
+- Indeed India → add &fromage=15 to URL (last 15 days)
+
+STRICT RULE: Skip any job you cannot confirm was posted within {max_days} days.
+
+Find {num_jobs} fresh jobs. Return ONLY this JSON array, nothing else:
 [
   {{
     "title": "AGM Production Planning",
@@ -89,6 +101,7 @@ After searching, respond with ONLY a JSON array like this (no other text):
     "experience": "12-15 years",
     "source": "Naukri",
     "url": "https://www.naukri.com/job-listings-...",
+    "posted_date": "3 days ago",
     "description": "Leading production planning for AC division..."
   }}
 ]"""
@@ -193,6 +206,7 @@ After searching, respond with ONLY a JSON array like this (no other text):
                 "source":       j.get("source", j.get("portal", "Web")),
                 "url":          j.get("url", j.get("link", j.get("apply_url", "#"))),
                 "description":  j.get("description", j.get("desc", j.get("about", ""))),
+                "posted_date":  j.get("posted_date", j.get("posted", j.get("date_posted", "Recent"))),
                 "match_score":  None,
                 "match_reason": "",
                 "strengths":    [],
@@ -256,11 +270,11 @@ def search_jobs_without_websearch(query, location, num_jobs):
         msg = client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=2000,
-            messages=[{"role": "user", "content": f"""List {num_jobs} realistic job opportunities for: "{query}" in {location}.
-Based on typical companies hiring for these roles in India (HVAC, automotive, consumer durables).
+            messages=[{"role": "user", "content": f"""List {num_jobs} realistic RECENT job opportunities (posted in last 15 days) for: "{query}" in {location}.
+Focus on companies in HVAC, automotive, consumer durables that typically hire for these roles.
 
 Return ONLY a JSON array, no other text:
-[{{"title":"...","company":"...","location":"...","experience":"...","source":"Naukri","url":"https://www.naukri.com/jobs-in-india","description":"..."}}]"""}]
+[{{"title":"...","company":"...","location":"...","experience":"...","source":"Naukri","url":"https://www.naukri.com/jobs-in-india","posted_date":"Recent","description":"..."}}]"""}]
         )
         text = re.sub(r"```json|```", "", msg.content[0].text).strip()
         match = re.search(r'\[.*\]', text, re.DOTALL)
@@ -433,13 +447,18 @@ elif page == "🔍 Find Jobs":
         location = st.text_input("Location", value="Delhi NCR / Greater Noida")
 
     custom = st.text_input("Custom search query (optional)", placeholder="e.g. VP Operations HVAC India")
-    num = st.slider("Number of jobs to find", 5, 20, 10)
+    col_n, col_f = st.columns(2)
+    with col_n:
+        num = st.slider("Number of jobs to find", 5, 20, 10)
+    with col_f:
+        max_days = st.slider("Max posting age (days)", 3, 30, 15,
+                             help="Only show jobs posted within this many days")
     auto_score = st.checkbox("Auto-score matches with AI", value=True)
 
     if st.button("🔍 Search Jobs with Claude AI", type="primary", use_container_width=True):
         query = custom if custom else role_options[role]
-        with st.spinner(f"🤖 Claude is searching Naukri, LinkedIn & Indeed for '{query}'..."):
-            jobs, error = search_jobs_with_claude(query, location, num)
+        with st.spinner(f"🤖 Claude is searching for jobs posted in last {max_days} days..."):
+            jobs, error = search_jobs_with_claude(query, location, num, max_days)
 
         if error:
             st.error(f"Search error: {error}")
@@ -478,8 +497,10 @@ elif page == "🔍 Find Jobs":
                 cl, cr = st.columns([3,1])
                 with cl:
                     st.markdown(f"**Company:** {j['company']}")
+                    posted = j.get("posted_date", "Recent")
+                    freshness_color = "🟢" if any(x in str(posted).lower() for x in ["today","hour","1 day","2 day","3 day"]) else ("🟡" if any(x in str(posted).lower() for x in ["4 day","5 day","6 day","7 day","1 week"]) else "🔵")
                     st.markdown(f"**Location:** {j['location']}  |  **Experience:** {j.get('experience','N/A')}")
-                    st.markdown(f"**Source:** {j['source']}")
+                    st.markdown(f"**Source:** {j['source']}  |  **Posted:** {freshness_color} {posted}")
                     if j.get("description"):
                         st.markdown(f"**About role:** {j['description']}")
                     if j.get("match_reason"):
