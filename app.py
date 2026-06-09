@@ -590,8 +590,18 @@ elif page == "🔍 Find Jobs":
                 with cr:
                     if sc:
                         st.markdown(f'<span class="{cls}">{sc}% match</span>', unsafe_allow_html=True)
-                    if j.get("url") and j["url"] != "#":
-                        st.link_button("🔗 Open & Apply", j["url"], use_container_width=True)
+                    import urllib.parse
+                    title_q   = urllib.parse.quote(j["title"])
+                    company_q = urllib.parse.quote(j["company"])
+                    combined_q = urllib.parse.quote(f"{j['title']} {j['company']}")
+
+                    naukri_url   = f"https://www.naukri.com/jobs-in-india?k={title_q}&jobAge=15"
+                    linkedin_url = f"https://www.linkedin.com/jobs/search/?keywords={combined_q}&location=India&f_TPR=r1209600&sortBy=DD"
+                    indeed_url   = f"https://in.indeed.com/jobs?q={combined_q}&l=India&fromage=15&sort=date"
+
+                    st.link_button("🟠 Search Naukri",   naukri_url,   use_container_width=True)
+                    st.link_button("🔵 Search LinkedIn", linkedin_url, use_container_width=True)
+                    st.link_button("🟣 Search Indeed",   indeed_url,   use_container_width=True)
 
                     if st.button("✍️ Cover Letter", key=f"cl_{j['id']}"):
                         with st.spinner("Writing..."):
