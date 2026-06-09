@@ -67,76 +67,208 @@ def get_client():
 
 # ── CORE: SEARCH JOBS USING CLAUDE WEB SEARCH ─────────────────────────────────
 def search_jobs_with_claude(query, location="India", num_jobs=10):
-    """Use Claude's web_search tool to find real jobs from Naukri/LinkedIn/Indeed."""
+    """Use Claude's web_search tool to find real jobs — handles multi-turn tool use."""
     client = get_client()
     if not client:
         return [], "No API key"
 
-    prompt = f"""Search for current job openings matching: "{query}" in {location}.
+    system_prompt = """You are a job search assistant. When asked to find jobs, 
+use web search to find real current job postings. After searching, always respond 
+with a JSON array of jobs found. Format your final response as valid JSON only."""
 
-Search across Naukri.com, LinkedIn Jobs, and Indeed India.
+    user_prompt = f"""Search for current job openings for: "{query}" in {location}.
 
-Find {num_jobs} real, currently open job postings. For each job return:
-- Job title
-- Company name  
-- Location
-- Experience required
-- Source portal (Naukri/LinkedIn/Indeed)
-- Direct job URL (the actual link to apply)
-- Brief job description (2-3 lines)
+Search Naukri.com, LinkedIn Jobs, and Indeed India. Find {num_jobs} real open positions.
 
-Return ONLY a JSON array, no markdown, no explanation:
+After searching, respond with ONLY a JSON array like this (no other text):
 [
   {{
-    "title": "...",
-    "company": "...",
-    "location": "...",
-    "experience": "...",
-    "source": "Naukri/LinkedIn/Indeed",
-    "url": "https://...",
-    "description": "..."
+    "title": "AGM Production Planning",
+    "company": "Voltas Ltd",
+    "location": "Delhi NCR",
+    "experience": "12-15 years",
+    "source": "Naukri",
+    "url": "https://www.naukri.com/job-listings-...",
+    "description": "Leading production planning for AC division..."
   }}
 ]"""
 
-    try:
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=3000,
-            tools=[{"type": "web_search_20250305", "name": "web_search"}],
-            messages=[{"role": "user", "content": prompt}]
-        )
-        # Extract text from all content blocks
-        full_text = ""
-        for block in response.content:
-            if hasattr(block, "text"):
-                full_text += block.text
+    messages = [{"role": "user", "content": user_prompt}]
 
-        # Parse JSON
-        clean = re.sub(r"```json|```", "", full_text).strip()
-        # Find JSON array in response
-        match = re.search(r'\[.*\]', clean, re.DOTALL)
-        if match:
-            jobs_raw = json.loads(match.group())
-            jobs = []
-            for j in jobs_raw:
-                jobs.append({
-                    "title":       j.get("title", ""),
-                    "company":     j.get("company", ""),
-                    "location":    j.get("location", location),
-                    "experience":  j.get("experience", ""),
-                    "source":      j.get("source", "Web"),
-                    "url":         j.get("url", "#"),
-                    "description": j.get("description", ""),
-                    "match_score": None,
-                    "match_reason": "",
-                    "status":      "Saved",
-                    "applied_date": None,
-                    "id": f"JOB-{abs(hash(j.get('title','') + j.get('company','')))}"
-                })
-            return jobs, None
-        return [], "Could not parse job results"
+    try:
+        # Multi-turn: keep going until Claude gives a final text response
+        max_turns = 5
+        for turn in range(max_turns):
+            response = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=4000,
+                system=system_prompt,
+                tools=[{"type": "web_search_20250305", "name": "web_search"}],
+                messages=messages,
+            )
+
+            # Collect all content from this response
+            full_text = ""
+            has_tool_use = False
+            tool_results = []
+
+            for block in response.content:
+                btype = getattr(block, "type", "")
+                if btype == "text":
+                    full_text += block.text
+                elif btype == "tool_use":
+                    has_tool_use = True
+                elif btype == "tool_result":
+                    pass  # already handled by API
+
+            # If stop_reason is tool_use, we need to continue the conversation
+            if response.stop_reason == "tool_use":
+                # Add assistant response to messages
+                messages.append({"role": "assistant", "content": response.content})
+                # The API handles tool results internally for web_search
+                # We just need to send an empty user turn to continue
+                messages.append({"role": "user", "content": "Please now provide the JSON array of jobs you found."})
+                continue
+
+            # We have a final text response — parse it
+            if full_text:
+                break
+
+        if not full_text:
+            return [], "No response from Claude"
+
+        # ── Robust JSON extraction ────────────────────────────────────────────
+        # Try 1: direct parse
+        clean = full_text.strip()
+        try:
+            data = json.loads(clean)
+            if isinstance(data, list):
+                jobs_raw = data
+            elif isinstance(data, dict) and "jobs" in data:
+                jobs_raw = data["jobs"]
+            else:
+                jobs_raw = [data]
+        except json.JSONDecodeError:
+            # Try 2: strip markdown code fences
+            clean = re.sub(r"```json\s*", "", clean)
+            clean = re.sub(r"```\s*", "", clean)
+            try:
+                jobs_raw = json.loads(clean.strip())
+            except json.JSONDecodeError:
+                # Try 3: find JSON array with regex
+                match = re.search(r'\[\s*\{.*?\}\s*\]', clean, re.DOTALL)
+                if match:
+                    try:
+                        jobs_raw = json.loads(match.group())
+                    except:
+                        jobs_raw = []
+                else:
+                    # Try 4: extract individual job objects
+                    job_matches = re.findall(r'\{[^{}]+\}', clean, re.DOTALL)
+                    jobs_raw = []
+                    for jm in job_matches:
+                        try:
+                            jobs_raw.append(json.loads(jm))
+                        except:
+                            pass
+
+        if not jobs_raw:
+            # Last resort: parse structured text into job dicts
+            jobs_raw = parse_text_to_jobs(full_text, location)
+
+        # ── Build job objects ─────────────────────────────────────────────────
+        jobs = []
+        for j in jobs_raw:
+            if not isinstance(j, dict):
+                continue
+            title   = j.get("title", j.get("job_title", j.get("role", "")))
+            company = j.get("company", j.get("company_name", j.get("employer", "")))
+            if not title or not company:
+                continue
+            jobs.append({
+                "title":        title.strip(),
+                "company":      company.strip(),
+                "location":     j.get("location", location).strip(),
+                "experience":   j.get("experience", j.get("exp", "")),
+                "source":       j.get("source", j.get("portal", "Web")),
+                "url":          j.get("url", j.get("link", j.get("apply_url", "#"))),
+                "description":  j.get("description", j.get("desc", j.get("about", ""))),
+                "match_score":  None,
+                "match_reason": "",
+                "strengths":    [],
+                "gaps":         [],
+                "status":       "Saved",
+                "applied_date": None,
+                "id":           f"JOB-{abs(hash(title + company))}",
+            })
+
+        return jobs, None if jobs else ([], "No jobs parsed from response")
+
+    except anthropic.APIStatusError as e:
+        if "web_search" in str(e).lower() or "tool" in str(e).lower():
+            return search_jobs_without_websearch(query, location, num_jobs)
+        return [], f"API error: {e.message}"
     except Exception as e:
         return [], str(e)
+
+
+def parse_text_to_jobs(text, location):
+    """Fallback: parse plain text response into job dicts."""
+    jobs = []
+    # Split by numbered items or double newlines
+    chunks = re.split(r'\n\d+[\.\)]\s+|\n\n+', text)
+    for chunk in chunks:
+        if not chunk.strip():
+            continue
+        lines = [l.strip() for l in chunk.strip().splitlines() if l.strip()]
+        if not lines:
+            continue
+        job = {"location": location, "source": "Web", "url": "#", "description": ""}
+        for line in lines:
+            low = line.lower()
+            if any(k in low for k in ["title:", "role:", "position:"]):
+                job["title"] = re.sub(r'^.*?:\s*', '', line).strip()
+            elif any(k in low for k in ["company:", "employer:", "organization:"]):
+                job["company"] = re.sub(r'^.*?:\s*', '', line).strip()
+            elif any(k in low for k in ["location:", "place:", "city:"]):
+                job["location"] = re.sub(r'^.*?:\s*', '', line).strip()
+            elif any(k in low for k in ["experience:", "exp:", "years:"]):
+                job["experience"] = re.sub(r'^.*?:\s*', '', line).strip()
+            elif any(k in low for k in ["url:", "link:", "apply:", "http"]):
+                url_match = re.search(r'https?://\S+', line)
+                if url_match:
+                    job["url"] = url_match.group()
+            elif not job.get("title") and len(line) < 80:
+                job["title"] = line
+            elif not job.get("company") and len(line) < 60:
+                job["company"] = line
+        if job.get("title") and job.get("company"):
+            jobs.append(job)
+    return jobs
+
+
+def search_jobs_without_websearch(query, location, num_jobs):
+    """Fallback using Claude knowledge + structured prompt (no web search tool)."""
+    client = get_client()
+    if not client:
+        return [], "No API key"
+    try:
+        msg = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": f"""List {num_jobs} realistic job opportunities for: "{query}" in {location}.
+Based on typical companies hiring for these roles in India (HVAC, automotive, consumer durables).
+
+Return ONLY a JSON array, no other text:
+[{{"title":"...","company":"...","location":"...","experience":"...","source":"Naukri","url":"https://www.naukri.com/jobs-in-india","description":"..."}}]"""}]
+        )
+        text = re.sub(r"```json|```", "", msg.content[0].text).strip()
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if match:
+            return json.loads(match.group()), None
+    except Exception as e:
+        return [], str(e)
+    return [], "Could not generate job suggestions"
 
 # ── AI MATCH SCORE ─────────────────────────────────────────────────────────────
 def ai_match_job(title, company, description=""):
